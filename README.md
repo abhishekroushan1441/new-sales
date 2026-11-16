@@ -5,6 +5,41 @@ An order website for the counter. Staff tap items, place the order, and move it 
 - **Website:** https://abhishekroushan1441.github.io/new-sales/
 - **API:** see [API.md](API.md). Reading is a plain link, e.g. latest orders, orders between two dates, or everything that changed since last time (so nothing is counted twice).
 
+## For teammates: reading orders
+
+Ask Abhishek for a read key (`ck_r_…`). Keys aren't in this repo because it's public. Every link below works in a browser.
+
+```
+BASE = https://dnvfeihwxhxcoroicblr.supabase.co/rest/v1/rpc
+PK   = sb_publishable_7GFBgbOec5crx3J1f0uvvQ_mBNnsdzo     (public, safe to share)
+KEY  = ck_r_…                                            (your read key)
+```
+
+| What you want | Link |
+|---|---|
+| Latest 20 orders, with items and ingredients | `BASE/cafe_orders?apikey=PK&key=KEY&max_rows=20&detail=true` |
+| Orders on one day | `BASE/cafe_orders?apikey=PK&key=KEY&date_from=2026-11-16&date_to=2026-11-16` |
+| Orders between two exact times | `BASE/cafe_orders?apikey=PK&key=KEY&date_from=2026-11-16T08:00:00-05:00&date_to=2026-11-16T12:00:00-05:00` |
+| Only some statuses | add `&status=New,Preparing,Ready` (or `Completed`, `Cancelled`) |
+| One order | `BASE/cafe_order?apikey=PK&key=KEY&id=ORD-261116-004` |
+| Ingredients used in a period | `BASE/cafe_usage?apikey=PK&key=KEY&date_from=2026-11-10&date_to=2026-11-16` |
+| Menu with recipes | `BASE/cafe_menu?apikey=PK&key=KEY&recipes=true` |
+
+Dates like `2026-11-16` are in the shop's time zone (Indiana) and an end date includes the whole day. Times in replies are UTC.
+
+### Keeping your own copy without double counting
+
+Every order has a `version` number that goes up whenever the order is placed or changed (for example, cancelled).
+
+1. First time: `BASE/cafe_orders?apikey=PK&key=KEY&after=0&detail=true`
+2. Save each order **by its `id`** (insert or replace, never add again), and remember `nextAfter` from the reply.
+3. Next time: same link with `after=<nextAfter>`. You only get orders that are new or changed since your last call.
+4. If `more` is `true`, call again right away with the new `nextAfter`.
+
+A cancelled order comes back with `status: "Cancelled"`, so leave it out (or take its ingredients off) when counting. `cafe_usage` already leaves cancelled orders out.
+
+Full details, code examples and how to place orders: [API.md](API.md).
+
 ## What's in here
 
 | File | What it is |
