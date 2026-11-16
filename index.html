@@ -239,10 +239,9 @@ h3{margin:0 0 10px;font-family:var(--serif);font-size:1.12rem}
     <div class="loading" id="menuLoading"><div class="spin"></div>Loading menu…</div>
     <form class="done" id="connectUI" hidden autocomplete="off">
       <h2 class="title" style="margin-top:0">Connect this device</h2>
-      <p class="muted">Open the setup link from your manager on this device, or paste the details here. This is needed only once per device.</p>
+      <p class="muted">Open the setup link from your manager on this device, or paste the staff key here. This is needed only once per device.</p>
       <div class="form" style="padding:0;border:0">
-        <label>Web app URL <input id="cUrl" type="url" placeholder="https://script.google.com/macros/s/…/exec" required></label>
-        <label>API key (write) <input id="cKey" type="text" placeholder="ck_w_…" required></label>
+        <label>Staff key <input id="cKey" type="text" placeholder="ck_w_…" required autocapitalize="off" spellcheck="false"></label>
         <p class="err" id="cErr" hidden></p>
         <button class="btn primary place" id="cBtn" type="submit"><span>Connect</span><span></span></button>
       </div>
@@ -315,36 +314,41 @@ h3{margin:0 0 10px;font-family:var(--serif);font-size:1.12rem}
 <script>
 (function(){
 'use strict';
-// When served by Apps Script the page talks to the sheet directly. Hosted anywhere else (e.g. GitHub Pages)
-// it needs the web app URL and a write key. Those are never stored in the code: each device connects once,
-// from a setup link (…#api=<web app URL>&key=<write key>) or the Connect form, and keeps them in this browser.
-var IN_GAS = !!(window.google && google.script && google.script.run);
-var STORE = 'cafe_orders_connection';
-function savedConn(){ try{ return JSON.parse(localStorage.getItem(STORE) || 'null') || {}; }catch(e){ return {}; } }
+// Orders are stored in Supabase (schema "cafe"). The page calls one function, public.cafe_api, with an API key.
+// The Supabase URL and publishable key below are safe to be public: they can only call that function,
+// and every call is checked against cafe.api_keys. The API key itself is never in the code: each device
+// connects once, from a setup link (…#key=<write key>) or the Connect screen, and keeps it in this browser.
+var SUPABASE = Object.assign({
+  URL: 'https://dnvfeihwxhxcoroicblr.supabase.co',
+  PUBLISHABLE_KEY: 'sb_publishable_7GFBgbOec5crx3J1f0uvvQ_mBNnsdzo'
+}, window.ORDER_CONFIG || {});
+var STORE = 'cafe_orders_key';
+function savedKey(){ try{ return localStorage.getItem(STORE) || ''; }catch(e){ return ''; } }
 (function readSetupLink(){
   var h = new URLSearchParams((location.hash || '').replace(/^#/, ''));
-  if (h.get('api') && h.get('key')){
-    try{ localStorage.setItem(STORE, JSON.stringify({ API_URL:h.get('api'), API_KEY:h.get('key') })); }catch(e){}
+  if (h.get('key')){
+    try{ localStorage.setItem(STORE, h.get('key')); }catch(e){}
     try{ history.replaceState(null, '', location.pathname + location.search); }catch(e){ location.hash = ''; }
   }
 })();
-var CONFIG = Object.assign({ API_URL:'', API_KEY:'' }, savedConn(), window.ORDER_CONFIG || {});
+var API_KEY = (window.ORDER_CONFIG && window.ORDER_CONFIG.API_KEY) || savedKey();
 var $ = function(id){ return document.getElementById(id); };
 
 /* ---------- talking to the sheet ---------- */
 function call(action, data){
-  var req = Object.assign({ action: action }, data || {});
-  if (IN_GAS) {
-    return new Promise(function(res, rej){ google.script.run.withSuccessHandler(res).withFailureHandler(rej).web(req); });
-  }
-  if (!CONFIG.API_URL) return Promise.reject(new Error('This device isn’t connected yet'));
-  req.key = CONFIG.API_KEY;
-  var write = action === 'createOrder' || action === 'updateStatus';
-  var url = CONFIG.API_URL;
-  var opts;
-  if (write) opts = { method:'POST', headers:{ 'Content-Type':'text/plain;charset=utf-8' }, body: JSON.stringify(req) };
-  else { url += (url.indexOf('?') < 0 ? '?' : '&') + Object.keys(req).map(function(k){ return encodeURIComponent(k)+'='+encodeURIComponent(req[k]); }).join('&'); opts = {}; }
-  return fetch(url, opts).then(function(r){ return r.json(); });
+  if (!API_KEY) return Promise.reject(new Error('This device isn’t connected yet'));
+  var payload = Object.assign({ action: action, key: API_KEY }, data || {});
+  if (action === 'createOrder') payload.via = 'website';
+  return fetch(SUPABASE.URL.replace(/\/$/, '') + '/rest/v1/rpc/cafe_api', {
+    method: 'POST',
+    headers: { 'apikey': SUPABASE.PUBLISHABLE_KEY, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ payload: payload })
+  }).then(function(r){
+    return r.json().catch(function(){ return null; }).then(function(j){
+      if (!r.ok) throw new Error((j && (j.message || j.error)) || ('Server error ' + r.status));
+      return j;
+    });
+  });
 }
 
 /* ---------- helpers ---------- */
@@ -403,7 +407,7 @@ function loadMenu(){
     $('menuLoading').hidden = true; $('orderUI').hidden = false;
   }).catch(function(e){
     var msg = String(e && e.message || e);
-    if (!IN_GAS && /key|connected/i.test(msg)) return showConnect(msg);
+    if (/key|connected/i.test(msg)) return showConnect(msg);
     $('menuLoading').textContent = 'Couldn’t load the menu: ' + msg + '. Check the connection and reload.';
   });
 }
@@ -704,23 +708,22 @@ $('uCopy').onclick = function(){
 };
 function fallbackCopy(text){ var t = el('textarea'); t.value = text; document.body.appendChild(t); t.select(); try{ document.execCommand('copy'); }catch(e){} t.remove(); }
 
-/* ---------- connecting (only outside Apps Script) ---------- */
+/* ---------- connecting a device ---------- */
 function showConnect(msg){
   $('menuLoading').hidden = true; $('orderUI').hidden = true; $('connectUI').hidden = false; $('mobileBar').hidden = true;
-  $('cUrl').value = CONFIG.API_URL || ''; $('cErr').hidden = !msg; $('cErr').textContent = msg || '';
+  $('cErr').hidden = !msg; $('cErr').textContent = msg || '';
 }
 $('connectUI').onsubmit = function(e){
   e.preventDefault();
-  var url = $('cUrl').value.trim(), key = $('cKey').value.trim();
-  if (!/^https:\/\/script\.google(usercontent)?\.com\//.test(url)){ $('cErr').textContent = 'Use the Web app URL from Apps Script (it ends in /exec).'; $('cErr').hidden = false; return; }
-  CONFIG.API_URL = url; CONFIG.API_KEY = key; $('cBtn').disabled = true; $('cErr').hidden = true;
+  var key = $('cKey').value.trim();
+  API_KEY = key; $('cBtn').disabled = true; $('cErr').hidden = true;
   call('menu').then(function(r){
     if (!r || !r.ok) throw new Error(r && r.error || 'Not connected');
-    try{ localStorage.setItem(STORE, JSON.stringify({ API_URL:url, API_KEY:key })); }catch(err){}
+    try{ localStorage.setItem(STORE, key); }catch(err){}
     location.reload();
   }).catch(function(err){ $('cErr').textContent = 'Couldn’t connect: ' + (err.message || err); $('cErr').hidden = false; $('cBtn').disabled = false; });
 };
-$('disconnectBtn').hidden = IN_GAS || !savedConn().API_URL;
+$('disconnectBtn').hidden = !savedKey();
 var discArm = false;
 $('disconnectBtn').onclick = function(){
   if (!discArm){ discArm = true; $('disconnectBtn').textContent = 'Tap again to disconnect'; setTimeout(function(){ discArm = false; $('disconnectBtn').textContent = 'Disconnect this device'; }, 3000); return; }
@@ -730,7 +733,7 @@ $('disconnectBtn').onclick = function(){
 
 /* ---------- start ---------- */
 $('today').textContent = new Date().toLocaleDateString([], { weekday:'long', month:'long', day:'numeric' });
-if (!IN_GAS && !CONFIG.API_URL) showConnect();
+if (!API_KEY) showConnect();
 else { loadMenu(); refreshCount(); }
 })();
 </script>

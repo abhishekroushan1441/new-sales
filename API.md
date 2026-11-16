@@ -1,87 +1,136 @@
 # Café Orders: API
 
-The order website and the API share one address: the **Web app URL** from Apps Script (Deploy → Manage deployments), ending in `/exec`. Every order recorded through either one is written to the Google Sheet:
+Orders are stored in Supabase (schema `cafe`). Every order placed on the website or through the API is saved as:
 
-| Tab | One row per | Used for |
+| Table | One row per | Used for |
 |---|---|---|
-| `Orders` | order | who, when, type, status, total |
-| `Order_Items` | item on an order | what was sold |
-| `Order_Constituents` | ingredient used by an order | quantity × the item's Recipe_BOM amount, saved when the order is placed |
+| `cafe.orders` | order | who, when, type, status, total, `version` |
+| `cafe.order_items` | item on an order | what was sold |
+| `cafe.order_constituents` | ingredient used by an order | quantity × the item's `recipe_bom` amount, saved when the order is placed |
 
-Changing `Recipe_BOM` later doesn't rewrite past orders; each order keeps the recipe it was made with.
+Changing `cafe.recipe_bom` later doesn't rewrite past orders; each order keeps the recipe it was made with.
 
-## Keys
+## What you need
 
-Every API call needs a key from the **API_Keys** tab:
-- `read` keys can call `menu`, `orders`, `order` and `usage`.
-- `write` keys can also call `createOrder` and `updateStatus`.
+| | Value |
+|---|---|
+| Base URL | `https://dnvfeihwxhxcoroicblr.supabase.co/rest/v1/rpc/` |
+| Publishable key | `sb_publishable_7GFBgbOec5crx3J1f0uvvQ_mBNnsdzo` (public; send it as `?apikey=` or an `apikey` header) |
+| API key | from the owner. `ck_r_…` keys read; `ck_w_…` keys can also place orders and change status |
 
-To add a key, add a row with a long random key (40+ characters). To switch one off, set **Active** to `FALSE`. **Last Used** fills in automatically.
+Every reply is JSON with `"ok": true`, or `"ok": false, "error": "…"`. Times are UTC (ISO 8601). Dates you send as `YYYY-MM-DD` use the shop's time zone (`America/Indiana/Indianapolis`), and an end date includes that whole day.
 
-Treat keys like passwords. A `write` key belongs on a server, never in public web pages.
+## Reading: plain links (GET)
 
-## Calling it
+These work in a browser, `curl`, `fetch`, Python, anything.
 
-- **Reading:** `GET <url>?action=<action>&key=<key>&…options`
-- **Changing:** `POST <url>` with a JSON body: `{"key": "…", "action": "…", …options}`
+```
+BASE=https://dnvfeihwxhxcoroicblr.supabase.co/rest/v1/rpc
+PK=sb_publishable_7GFBgbOec5crx3J1f0uvvQ_mBNnsdzo
 
-Google answers a POST with a redirect, so follow it: `curl -L`, or `fetch` (which follows automatically). From a browser, send the body as `text/plain` to avoid a CORS preflight.
+# 20 newest orders, with items and ingredients
+$BASE/cafe_orders?apikey=$PK&key=ck_r_…&max_rows=20&detail=true
 
-Every reply is JSON with `"ok": true`, or `"ok": false, "error": "…"`.
+# today's orders that are still open
+$BASE/cafe_orders?apikey=$PK&key=ck_r_…&date_from=2026-11-16&date_to=2026-11-16&status=New,Preparing,Ready
 
-```bash
-URL="https://script.google.com/macros/s/…/exec"
+# between two exact times
+$BASE/cafe_orders?apikey=$PK&key=ck_r_…&date_from=2026-11-16T08:00:00-05:00&date_to=2026-11-16T12:00:00-05:00
 
-# today's orders with items and ingredients
-curl -sL "$URL?action=orders&key=$READ_KEY&detail=true"
+# everything that changed since you last checked (see "Never double-count" below)
+$BASE/cafe_orders?apikey=$PK&key=ck_r_…&after=0&detail=true
 
-# ingredients used this week
-curl -sL "$URL?action=usage&key=$READ_KEY&from=2026-11-10&to=2026-11-16"
+# one order
+$BASE/cafe_order?apikey=$PK&key=ck_r_…&id=ORD-261116-004
 
-# place an order
-curl -sL "$URL" -H "Content-Type: text/plain" -d '{
-  "key": "'$WRITE_KEY'", "action": "createOrder", "ref": "pos-10023",
-  "customer": "Ana", "type": "Takeout",
-  "items": [{"item": "Latte", "qty": 2, "note": "oat milk"}, {"item": "Croissant", "qty": 3}]
-}'
+# ingredient totals for a period (cancelled orders left out)
+$BASE/cafe_usage?apikey=$PK&key=ck_r_…&date_from=2026-11-10&date_to=2026-11-16
+
+# menu, with each item's recipe
+$BASE/cafe_menu?apikey=$PK&key=ck_r_…&recipes=true
 ```
 
+| Endpoint | Options | Returns |
+|---|---|---|
+| `cafe_orders` | `after` (version number, see below), `date_from`, `date_to` (`YYYY-MM-DD` or ISO time), `status` (comma list: `New`, `Preparing`, `Ready`, `Completed`, `Cancelled`), `max_rows` (default 100, max 1000), `detail=true` (items + ingredients) | `count, orders, more, latestVersion`, and `nextAfter` when you sent `after`. Without `after`: newest first. With `after`: oldest change first. |
+| `cafe_order` | `id` | `order` with items and ingredients |
+| `cafe_usage` | `date_from`, `date_to` (default today) | `orders, items: [{item, category, qty}], materials: [{materialId, material, category, unit, total, orders}]` |
+| `cafe_menu` | `recipes=true`, `show_all=true` (include unavailable items) | `shop, currency, timeZone, orderTypes, statuses, items: [{category, item, price, available, hasRecipe, recipe?}]` |
+
+## Never double-count
+
+Every order has a `version`. It is set when the order is placed and **raised again every time the order changes** (for example when it's cancelled). So:
+
+1. First run: call `cafe_orders?after=0&detail=true`. Save each order **by its `id`** (insert or replace, never add twice).
+2. Remember `nextAfter` from the reply.
+3. Every few minutes: call `cafe_orders?after=<nextAfter you saved>&detail=true`. You get only new orders and orders that changed since then. Replace them by `id` and save the new `nextAfter`.
+4. If `more` is `true`, call again straight away with the new `nextAfter`; there were more than `max_rows` changes.
+
+To count ingredients, leave out orders whose `status` is `Cancelled`. When an order you already counted comes back as `Cancelled`, take its ingredients off again. Or just call `cafe_usage` for the period, which does this for you.
+
 ```js
-async function cafe(action, options = {}, write = false) {
-  const base = { key: API_KEY, action, ...options };
-  const res = write
-    ? await fetch(URL, { method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: JSON.stringify(base) })
-    : await fetch(URL + '?' + new URLSearchParams(base));
-  const data = await res.json();
-  if (!data.ok) throw new Error(data.error);
-  return data;
+const BASE = 'https://dnvfeihwxhxcoroicblr.supabase.co/rest/v1/rpc/';
+const PK = 'sb_publishable_7GFBgbOec5crx3J1f0uvvQ_mBNnsdzo';
+const KEY = 'ck_r_…';
+
+let after = Number(localStorage.getItem('cafe_after') || 0);
+const orders = {};                         // id → order (use your own database here)
+
+async function sync() {
+  let more = true;
+  while (more) {
+    const r = await fetch(`${BASE}cafe_orders?apikey=${PK}&key=${KEY}&after=${after}&detail=true&max_rows=500`).then(r => r.json());
+    if (!r.ok) throw new Error(r.error);
+    for (const o of r.orders) orders[o.id] = o;   // replace by id: never counted twice
+    after = r.nextAfter; more = r.more;
+  }
+  localStorage.setItem('cafe_after', after);
 }
-const { materials } = await cafe('usage', { from: '2026-11-01', to: '2026-11-16' });
 ```
 
 ```python
 import requests
-r = requests.get(URL, params={"action": "usage", "key": READ_KEY, "date": "2026-11-16"})
-print(r.json()["materials"])
+BASE = "https://dnvfeihwxhxcoroicblr.supabase.co/rest/v1/rpc/"
+PK = "sb_publishable_7GFBgbOec5crx3J1f0uvvQ_mBNnsdzo"
+
+r = requests.get(BASE + "cafe_orders", params={"apikey": PK, "key": READ_KEY, "after": last_after, "detail": "true"}).json()
+for o in r["orders"]:
+    upsert(o["id"], o)          # replace by id
+last_after = r["nextAfter"]
 ```
 
-## Actions
+## Changing: POST
 
-| Action | Method | Options | Returns |
-|---|---|---|---|
-| `menu` | GET | `recipes=true` (include each item's ingredients), `all=true` (include unavailable items) | `shop, currency, orderTypes, statuses, items: [{category, item, price, available, hasRecipe, recipe?}]` |
-| `orders` | GET | `date` or `from`/`to` (`YYYY-MM-DD`, default today), `status` (comma list, e.g. `New,Preparing`), `since` (ISO time; orders created or changed after it, ignoring dates), `detail=true` (items + ingredients), `limit` (default 200, max 1000) | `count, orders: [order]`, newest first |
-| `order` | GET | `id` (e.g. `ORD-261116-004`) | `order` with items and ingredients |
-| `usage` | GET | `date` or `from`/`to` (default today) | `orders, items: [{item, category, qty}], materials: [{materialId, material, category, unit, total, orders}]` |
-| `createOrder` | POST, write key | `items: [{item, qty, note?}]` (required; item names as in the Menu tab, any capitalisation), `customer`, `type` (one of the Settings order types), `notes`, `ref` (your own unique id, so a retry never creates a second order) | `order` with items and ingredients; `warning` if an item has no recipe |
-| `updateStatus` | POST, write key | `id`, `status`: `New`, `Preparing`, `Ready`, `Completed` or `Cancelled` | updated `order` |
+Place an order or change its status with a `ck_w_…` key.
 
-**Order**
+```
+POST https://dnvfeihwxhxcoroicblr.supabase.co/rest/v1/rpc/cafe_api
+Headers: apikey: sb_publishable_…     Content-Type: application/json
+Body:    {"payload": {"key": "ck_w_…", "action": "…", …options}}
+```
+
+```bash
+curl -s https://dnvfeihwxhxcoroicblr.supabase.co/rest/v1/rpc/cafe_api \
+  -H "apikey: sb_publishable_7GFBgbOec5crx3J1f0uvvQ_mBNnsdzo" -H "Content-Type: application/json" \
+  -d '{"payload": {"key": "ck_w_…", "action": "createOrder", "ref": "pos-10023",
+       "customer": "Ana", "type": "Takeout",
+       "items": [{"item": "Latte", "qty": 2, "note": "oat milk"}, {"item": "Croissant", "qty": 3}]}}'
+```
+
+| Action | Options | Returns |
+|---|---|---|
+| `createOrder` | `items: [{item, qty, note?}]` (required; names as on the menu, any capitalisation; qty 1–999), `customer`, `type` (one of the menu's `orderTypes`), `notes`, `ref` (your own unique id, so a retry never creates a second order) | `order` with items and ingredients; `warning` if an item has no recipe; `duplicate: true` if that `ref` was already used |
+| `updateStatus` | `id`, `status`: `New`, `Preparing`, `Ready`, `Completed` or `Cancelled` | updated `order` |
+| `menu`, `orders`, `order`, `usage` | same as the GET versions, with `from` / `to` / `limit` in place of `date_from` / `date_to` / `max_rows` | same |
+
+## Order
+
 ```json
 {
   "id": "ORD-261116-001",
-  "createdAt": "2026-11-16T21:00:08.798Z",
-  "updatedAt": "2026-11-16T21:04:51.120Z",
+  "version": 14,
+  "createdAt": "2026-11-16T21:00:08.798+00:00",
+  "updatedAt": "2026-11-16T21:04:51.120+00:00",
   "customer": "Ana",
   "type": "Takeout",
   "summary": "2× Latte, 3× Croissant",
@@ -90,22 +139,25 @@ print(r.json()["materials"])
   "status": "Preparing",
   "notes": "",
   "source": "Website",
+  "ref": "w-lx2k…",
   "items": [{ "line": 1, "category": "Drinks", "item": "Latte", "qty": 2, "unitPrice": null, "lineTotal": null, "note": "oat milk" }],
   "constituents": [{ "item": "Latte", "itemQty": 2, "materialId": "MAT-001", "material": "Coffee beans", "perItem": 0.6, "total": 1.2, "unit": "oz" }]
 }
 ```
 
-Notes on these fields:
-- `total` is `null` until every item on the order has a Price in the Menu tab.
+- `total` is `null` until every item on the order has a price in `cafe.menu_items`.
 - `source` is `Website`, or `API · <key name>`.
-- Times are UTC.
-- Dates in options (`date`, `from`, `to`) use the script's time zone (Apps Script → Project Settings).
+- `items` and `constituents` are included with `detail=true`, and always for `cafe_order` and `createOrder`.
 
-## Using it from the inventory project
-- **Ingredient totals for a period:** call `usage`. Cancelled orders are already left out, and amounts use the units in `Recipe_BOM` (convert to stock units with the pack sizes in `Materials`).
-- **Keeping a running copy:** poll `orders?since=<last time you checked>&detail=true` every few minutes. Each reply includes new orders and orders whose status changed (for example cancelled), so you can subtract or add back the ingredients.
-- **Reading the Sheet directly:** `Order_Constituents` has the same data, one row per ingredient per order, with a `Status` column.
+## Keys
 
-## Limits
-- Each call takes about 1–2 seconds, and orders are saved one at a time (a lock prevents two orders getting the same ID). That's plenty for a café counter. For hundreds of orders a minute, move the data to a database.
-- A busy café adds roughly 100k ingredient rows a year to `Order_Constituents`, well within Google Sheets' 10 million cell limit. Archive old rows to another tab once a year to keep `usage` fast.
+Keys live in `cafe.api_keys`. Only a hash of each key is stored, so copy a new key when you make it. In the Supabase SQL Editor:
+
+```sql
+-- 1. make a key and copy it (use ck_w_ instead of ck_r_ for a key that can place orders)
+select 'ck_r_' || encode(extensions.gen_random_bytes(16), 'hex');
+-- 2. save it, with a name and 'read' or 'write'
+select cafe.add_key('ck_r_paste-it-here', 'Teammate dashboard', 'read');
+```
+
+To switch a key off: Table Editor → schema `cafe` → `api_keys` → set `active` to false.
