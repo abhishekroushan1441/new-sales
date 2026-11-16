@@ -1,0 +1,637 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<base target="_top">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Café Orders</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500&display=swap">
+<style>
+/* Layout: header with tabs; New order = menu grid + cart (side panel on wide screens, bottom sheet on phones); Orders board; Ingredients used table */
+:root{
+  --bg:#f5f1ec; --surface:#ffffff; --ink:#24180f; --muted:#7a6a5f; --line:#e7ddd3; --soft:#faf7f3;
+  --brand:#6f4027; --brand-ink:#ffffff; --brand-soft:#f3e8df;
+  --new:#1d4ed8; --new-soft:#e5ecfd; --prep:#b45309; --prep-soft:#fdf0dc; --ready:#15803d; --ready-soft:#e3f4e8;
+  --done:#6b7280; --done-soft:#eef0f2; --bad:#c2281d; --bad-soft:#fde7e5;
+  --f:"Figtree",system-ui,-apple-system,"Segoe UI",sans-serif; --mono:"JetBrains Mono",ui-monospace,Menlo,monospace;
+}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html,body{margin:0;height:100%}
+body{background:var(--bg);color:var(--ink);font-family:var(--f);font-size:15px;line-height:1.45}
+button{font:inherit;cursor:pointer;color:inherit}
+button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:2px solid var(--brand);outline-offset:2px}
+input,select,textarea{font:inherit;color:var(--ink)}
+
+header{position:sticky;top:0;z-index:20;background:var(--surface);border-bottom:1px solid var(--line)}
+.bar{max-width:1240px;margin:0 auto;padding:10px max(16px,env(safe-area-inset-right)) 0 max(16px,env(safe-area-inset-left));display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:6px 18px}
+.brand{display:flex;align-items:center;gap:10px;padding-bottom:10px}
+.mark{width:34px;height:34px;border-radius:10px;background:var(--brand);color:var(--brand-ink);display:grid;place-items:center;font-weight:800}
+.brand h1{margin:0;font-size:1.15rem;font-weight:800;letter-spacing:-.01em}
+.brand small{display:block;color:var(--muted);font-size:.78rem;font-weight:500}
+nav{display:flex;gap:4px}
+nav button{border:0;background:none;padding:10px 14px 12px;font-weight:600;color:var(--muted);border-bottom:3px solid transparent}
+nav button[aria-selected="true"]{color:var(--ink);border-bottom-color:var(--brand)}
+nav .count{display:inline-block;min-width:20px;padding:0 6px;margin-left:4px;border-radius:99px;background:var(--new);color:#fff;font-size:.72rem;line-height:18px;text-align:center}
+
+main{max-width:1240px;margin:0 auto;padding:16px max(16px,env(safe-area-inset-right)) 120px max(16px,env(safe-area-inset-left))}
+.btn{border:1px solid var(--line);background:var(--surface);border-radius:10px;padding:9px 14px;font-weight:600}
+.btn.primary{background:var(--brand);border-color:var(--brand);color:var(--brand-ink)}
+.btn.ghost{background:transparent}
+.btn:disabled{opacity:.5;cursor:default}
+.muted{color:var(--muted)}
+.empty{color:var(--muted);text-align:center;padding:40px 16px}
+
+/* new order */
+.order{display:grid;grid-template-columns:minmax(0,1fr) 380px;gap:18px;align-items:start}
+.order > div{min-width:0}
+.tools{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px;align-items:center}
+.search{flex:1 1 220px;min-width:0;border:1px solid var(--line);background:var(--surface);border-radius:10px;padding:10px 12px}
+.chips{display:flex;gap:6px;overflow-x:auto;padding-bottom:4px;margin-bottom:10px;scrollbar-width:none}
+.chip{flex:none;border:1px solid var(--line);background:var(--surface);border-radius:99px;padding:6px 13px;font-weight:600;font-size:.88rem;white-space:nowrap}
+.chip[aria-pressed="true"]{background:var(--ink);border-color:var(--ink);color:#fff}
+.cat{margin:14px 0 8px;font-size:.75rem;letter-spacing:.09em;text-transform:uppercase;color:var(--muted);font-weight:700}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px}
+.item{position:relative;text-align:left;border:1px solid var(--line);background:var(--surface);border-radius:12px;padding:12px;min-height:84px;display:flex;flex-direction:column;justify-content:space-between;gap:8px;transition:border-color .12s,transform .06s}
+.item:hover{border-color:#cdbcae}
+.item:active{transform:scale(.98)}
+.item b{font-weight:650;line-height:1.25}
+.item .price{color:var(--muted);font-size:.88rem}
+.item .nr{color:var(--prep);font-size:.72rem;font-weight:600}
+.item .inc{position:absolute;top:-7px;right:-7px;min-width:24px;height:24px;border-radius:99px;background:var(--brand);color:#fff;font-size:.8rem;font-weight:700;display:grid;place-items:center;padding:0 6px}
+
+.cart{position:sticky;top:76px;background:var(--surface);border:1px solid var(--line);border-radius:14px;display:flex;flex-direction:column;max-height:calc(100vh - 92px)}
+.cart-head{display:flex;justify-content:space-between;align-items:center;padding:14px 16px;border-bottom:1px solid var(--line)}
+.cart-head h2{margin:0;font-size:1.05rem}
+.lines{overflow:auto;padding:4px 16px;flex:1}
+.line{display:grid;grid-template-columns:1fr auto;gap:4px 10px;padding:10px 0;border-bottom:1px solid var(--line)}
+.line:last-child{border-bottom:0}
+.line .n{font-weight:600;min-width:0}
+.line .p{grid-column:1;color:var(--muted);font-size:.84rem}
+.stepper{grid-row:1/3;grid-column:2;display:flex;align-items:center;border:1px solid var(--line);border-radius:10px;overflow:hidden;align-self:center}
+.stepper button{border:0;background:var(--soft);width:34px;height:34px;font-size:1.1rem}
+.stepper span{min-width:30px;text-align:center;font-weight:700;font-family:var(--mono);font-size:.95rem}
+.line .notebtn{grid-column:1;justify-self:start;border:0;background:none;padding:0;color:var(--brand);font-size:.82rem;font-weight:600}
+.line input.note{grid-column:1/3;border:1px solid var(--line);border-radius:8px;padding:7px 9px;font-size:.88rem}
+.form{padding:12px 16px;border-top:1px solid var(--line);display:flex;flex-direction:column;gap:10px}
+.form label{font-size:.8rem;font-weight:600;color:var(--muted);display:flex;flex-direction:column;gap:4px}
+.form input,.form textarea{border:1px solid var(--line);border-radius:10px;padding:9px 11px;background:var(--surface);width:100%}
+.form textarea{resize:vertical;min-height:40px}
+.seg{display:flex;flex-wrap:wrap;gap:6px}
+.seg button{flex:1 1 auto;border:1px solid var(--line);background:var(--surface);border-radius:10px;padding:8px 10px;font-weight:600;font-size:.88rem}
+.seg button[aria-pressed="true"]{background:var(--brand-soft);border-color:var(--brand);color:var(--brand)}
+.place{display:flex;justify-content:space-between;align-items:center;width:100%;padding:13px 16px;font-size:1rem;border-radius:12px}
+.err{color:var(--bad);font-size:.88rem;margin:0}
+.mobilebar{display:none}
+
+.done{max-width:560px;margin:10px auto;background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:22px}
+.done .tick{width:44px;height:44px;border-radius:50%;background:var(--ready-soft);color:var(--ready);display:grid;place-items:center;font-size:1.4rem;font-weight:800}
+.done h2{margin:12px 0 2px;font-size:1.35rem}
+.done .id{font-family:var(--mono);font-size:1rem}
+.disconnect{display:block;margin:28px auto 0;border:0;background:none;color:var(--muted);font-size:.82rem;text-decoration:underline}
+.warn{background:var(--prep-soft);color:var(--prep);border-radius:10px;padding:9px 12px;font-size:.88rem;margin:10px 0 0}
+
+table{width:100%;border-collapse:collapse;font-size:.9rem}
+th{text-align:left;font-size:.72rem;letter-spacing:.07em;text-transform:uppercase;color:var(--muted);font-weight:700;padding:8px 10px;border-bottom:1px solid var(--line)}
+td{padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
+.tablewrap{overflow-x:auto;background:var(--surface);border:1px solid var(--line);border-radius:12px}
+tr.group td{background:var(--soft);font-weight:700;font-size:.78rem;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+
+/* orders board */
+.filters{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:14px}
+.filters input[type=date]{border:1px solid var(--line);border-radius:10px;padding:7px 10px;background:var(--surface)}
+.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(290px,1fr));gap:12px}
+.ocard{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:14px;display:flex;flex-direction:column;gap:8px}
+.ocard .top{display:flex;justify-content:space-between;gap:10px;align-items:flex-start}
+.ocard .oid{font-family:var(--mono);font-size:.85rem}
+.ocard .who{font-weight:700;font-size:1.02rem}
+.ocard .meta{color:var(--muted);font-size:.82rem}
+.ocard ul{margin:0;padding-left:18px}
+.ocard li{margin:2px 0}
+.ocard li small{color:var(--muted)}
+.ocard .actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:2px}
+.ocard .actions .btn{padding:7px 12px;font-size:.88rem}
+.ocard details summary{cursor:pointer;color:var(--brand);font-weight:600;font-size:.86rem}
+.ocard details table{font-size:.82rem;margin-top:6px}
+.ocard details td{padding:4px 6px}
+.pill{font-size:.72rem;font-weight:700;letter-spacing:.04em;text-transform:uppercase;border-radius:99px;padding:3px 9px;white-space:nowrap}
+.s-New{background:var(--new-soft);color:var(--new)} .s-Preparing{background:var(--prep-soft);color:var(--prep)}
+.s-Ready{background:var(--ready-soft);color:var(--ready)} .s-Completed{background:var(--done-soft);color:var(--done)}
+.s-Cancelled{background:var(--bad-soft);color:var(--bad)}
+
+/* usage */
+.stats{display:flex;flex-wrap:wrap;gap:10px;margin:0 0 14px}
+.stat{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:10px 14px;min-width:130px}
+.stat b{display:block;font-size:1.35rem;font-variant-numeric:tabular-nums}
+.stat span{color:var(--muted);font-size:.8rem}
+.two{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,2fr);gap:16px;align-items:start}
+h3{margin:0 0 8px;font-size:.95rem}
+
+.toast{position:fixed;left:50%;top:14px;transform:translateX(-50%);background:var(--ink);color:#fff;padding:10px 16px;border-radius:10px;font-size:.92rem;z-index:50;max-width:calc(100% - 32px)}
+.loading{display:flex;align-items:center;gap:10px;color:var(--muted);padding:30px 0;justify-content:center}
+.spin{width:18px;height:18px;border:2px solid var(--line);border-top-color:var(--brand);border-radius:50%;animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion: reduce){.spin{animation:none}.item{transition:none}}
+
+@media (max-width:900px){
+  .order{grid-template-columns:minmax(0,1fr)}
+  .cart{position:fixed;inset:auto 0 0 0;top:auto;max-height:88vh;border-radius:18px 18px 0 0;z-index:40;box-shadow:0 -8px 30px rgba(0,0,0,.18);transform:translateY(105%);transition:transform .2s}
+  .cart.open{transform:none}
+  .mobilebar{display:flex;position:fixed;left:0;right:0;bottom:0;z-index:30;padding:10px max(16px,env(safe-area-inset-right)) calc(10px + env(safe-area-inset-bottom)) max(16px,env(safe-area-inset-left));background:var(--surface);border-top:1px solid var(--line)}
+  .mobilebar .btn{width:100%;display:flex;justify-content:space-between;padding:13px 16px;font-size:1rem}
+  .shade{position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:35}
+  .two{grid-template-columns:1fr}
+  nav button{padding:8px 10px 10px}
+}
+</style>
+</head>
+<body>
+<header>
+  <div class="bar">
+    <div class="brand"><div class="mark" id="mark">C</div><div><h1 id="shop">Café Orders</h1><small id="today"></small></div></div>
+    <nav role="tablist">
+      <button role="tab" aria-selected="true" data-view="new">New order</button>
+      <button role="tab" aria-selected="false" data-view="orders">Orders <span class="count" id="activeCount" hidden>0</span></button>
+      <button role="tab" aria-selected="false" data-view="usage">Ingredients used</button>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <!-- NEW ORDER -->
+  <section id="v-new">
+    <div class="loading" id="menuLoading"><div class="spin"></div>Loading menu…</div>
+    <form class="done" id="connectUI" hidden autocomplete="off">
+      <h2 style="margin-top:0">Connect this device</h2>
+      <p class="muted">Open the setup link from your manager on this device, or paste the details here. This is needed only once per device.</p>
+      <div class="form" style="padding:0;border:0">
+        <label>Web app URL <input id="cUrl" type="url" placeholder="https://script.google.com/macros/s/…/exec" required></label>
+        <label>API key (write) <input id="cKey" type="text" placeholder="ck_w_…" required></label>
+        <p class="err" id="cErr" hidden></p>
+        <button class="btn primary place" id="cBtn" type="submit"><span>Connect</span><span></span></button>
+      </div>
+    </form>
+    <div class="order" id="orderUI" hidden>
+      <div>
+        <div class="tools"><input class="search" id="search" type="search" placeholder="Search the menu" autocomplete="off"></div>
+        <div class="chips" id="cats"></div>
+        <div id="menu"></div>
+      </div>
+      <aside class="cart" id="cart" aria-label="Current order">
+        <div class="cart-head"><h2>Current order</h2><button class="btn ghost" id="clearBtn" type="button">Clear</button></div>
+        <div class="lines" id="lines"></div>
+        <div class="form">
+          <label>Customer name <input id="customer" type="text" maxlength="80" placeholder="Optional" autocomplete="off"></label>
+          <div class="seg" id="types" role="group" aria-label="Order type"></div>
+          <label>Order notes <textarea id="notes" rows="1" maxlength="500" placeholder="Optional"></textarea></label>
+          <p class="err" id="placeErr" hidden></p>
+          <button class="btn primary place" id="placeBtn" type="button" disabled><span id="placeLabel">Place order</span><span id="placeTotal"></span></button>
+        </div>
+      </aside>
+    </div>
+    <div class="done" id="doneUI" hidden>
+      <div class="tick">✓</div>
+      <h2>Order placed</h2>
+      <div class="id" id="doneId"></div>
+      <p class="muted" id="doneSummary"></p>
+      <p class="warn" id="doneWarn" hidden></p>
+      <h3 style="margin-top:16px">Ingredients recorded</h3>
+      <div class="tablewrap"><table><thead><tr><th>Ingredient</th><th>For</th><th class="num">Amount</th></tr></thead><tbody id="doneCons"></tbody></table></div>
+      <div style="display:flex;gap:8px;margin-top:16px;flex-wrap:wrap"><button class="btn primary" id="newBtn" type="button">New order</button><button class="btn" id="toOrdersBtn" type="button">See orders</button></div>
+    </div>
+  </section>
+
+  <!-- ORDERS -->
+  <section id="v-orders" hidden>
+    <div class="filters">
+      <input type="date" id="oDate" aria-label="Day">
+      <div class="seg" id="oFilter" role="group" aria-label="Show">
+        <button type="button" data-f="active" aria-pressed="true">Active</button>
+        <button type="button" data-f="Completed" aria-pressed="false">Completed</button>
+        <button type="button" data-f="Cancelled" aria-pressed="false">Cancelled</button>
+        <button type="button" data-f="all" aria-pressed="false">All</button>
+      </div>
+      <button class="btn" id="oRefresh" type="button">Refresh</button>
+    </div>
+    <div id="oList"></div>
+  </section>
+
+  <!-- USAGE -->
+  <section id="v-usage" hidden>
+    <div class="filters">
+      <label class="muted">From <input type="date" id="uFrom"></label>
+      <label class="muted">To <input type="date" id="uTo"></label>
+      <div class="seg" id="uQuick"><button type="button" data-q="0">Today</button><button type="button" data-q="1">Yesterday</button><button type="button" data-q="7">Last 7 days</button></div>
+      <button class="btn" id="uCopy" type="button">Copy as CSV</button>
+    </div>
+    <div id="uBody"></div>
+  </section>
+  <button class="disconnect" id="disconnectBtn" type="button" hidden>Disconnect this device</button>
+</main>
+
+<div class="mobilebar" id="mobileBar"><button class="btn primary" id="reviewBtn" type="button" disabled><span id="reviewLabel">No items yet</span><span id="reviewTotal"></span></button></div>
+<div class="shade" id="shade" hidden></div>
+<div class="toast" id="toast" hidden></div>
+
+<script>
+(function(){
+'use strict';
+// When served by Apps Script the page talks to the sheet directly. Hosted anywhere else (e.g. GitHub Pages)
+// it needs the web app URL and a write key. Those are never stored in the code: each device connects once,
+// from a setup link (…#api=<web app URL>&key=<write key>) or the Connect form, and keeps them in this browser.
+var IN_GAS = !!(window.google && google.script && google.script.run);
+var STORE = 'cafe_orders_connection';
+function savedConn(){ try{ return JSON.parse(localStorage.getItem(STORE) || 'null') || {}; }catch(e){ return {}; } }
+(function readSetupLink(){
+  var h = new URLSearchParams((location.hash || '').replace(/^#/, ''));
+  if (h.get('api') && h.get('key')){
+    try{ localStorage.setItem(STORE, JSON.stringify({ API_URL:h.get('api'), API_KEY:h.get('key') })); }catch(e){}
+    try{ history.replaceState(null, '', location.pathname + location.search); }catch(e){ location.hash = ''; }
+  }
+})();
+var CONFIG = Object.assign({ API_URL:'', API_KEY:'' }, savedConn(), window.ORDER_CONFIG || {});
+var $ = function(id){ return document.getElementById(id); };
+
+/* ---------- talking to the sheet ---------- */
+function call(action, data){
+  var req = Object.assign({ action: action }, data || {});
+  if (IN_GAS) {
+    return new Promise(function(res, rej){ google.script.run.withSuccessHandler(res).withFailureHandler(rej).web(req); });
+  }
+  if (!CONFIG.API_URL) return Promise.reject(new Error('This device isn’t connected yet'));
+  req.key = CONFIG.API_KEY;
+  var write = action === 'createOrder' || action === 'updateStatus';
+  var url = CONFIG.API_URL;
+  var opts;
+  if (write) opts = { method:'POST', headers:{ 'Content-Type':'text/plain;charset=utf-8' }, body: JSON.stringify(req) };
+  else { url += (url.indexOf('?') < 0 ? '?' : '&') + Object.keys(req).map(function(k){ return encodeURIComponent(k)+'='+encodeURIComponent(req[k]); }).join('&'); opts = {}; }
+  return fetch(url, opts).then(function(r){ return r.json(); });
+}
+
+/* ---------- helpers ---------- */
+var shop = { currency:'$', orderTypes:['Dine-in','Takeout','Pickup'], statuses:[] };
+var menu = [], cart = [], ref = '', orderType = '';
+function money(n){ return n === null || n === undefined ? '' : shop.currency + Number(n).toFixed(2); }
+function num(n){ var r = Math.round(n * 1000) / 1000; return String(r); }
+function el(tag, cls, text){ var e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; }
+function uuid(){ return 'w-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10); }
+var toastT;
+function toast(msg){ var t = $('toast'); t.textContent = msg; t.hidden = false; clearTimeout(toastT); toastT = setTimeout(function(){ t.hidden = true; }, 2600); }
+function ymd(d){ var p = function(x){ return String(x).padStart(2,'0'); }; return d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate()); }
+function timeOf(iso){ return iso ? new Date(iso).toLocaleTimeString([], { hour:'numeric', minute:'2-digit' }) : ''; }
+function loading(){ var d = el('div','loading'); d.appendChild(el('div','spin')); d.appendChild(document.createTextNode('Loading…')); return d; }
+
+/* ---------- tabs ---------- */
+var view = 'new';
+document.querySelectorAll('nav button').forEach(function(b){
+  b.onclick = function(){ show(b.dataset.view); };
+});
+function show(v){
+  view = v;
+  document.querySelectorAll('nav button').forEach(function(b){ b.setAttribute('aria-selected', String(b.dataset.view === v)); });
+  ['new','orders','usage'].forEach(function(x){ $('v-'+x).hidden = x !== v; });
+  $('mobileBar').hidden = v !== 'new' || !$('doneUI').hidden;
+  if (v === 'orders') loadOrders();
+  if (v === 'usage') loadUsage();
+}
+
+/* ---------- menu ---------- */
+var activeCat = 'All';
+function loadMenu(){
+  call('menu').then(function(r){
+    if (!r || !r.ok) throw new Error(r && r.error || 'Could not load the menu');
+    shop = r; menu = r.items; $('connectUI').hidden = true;
+    $('shop').textContent = r.shop; document.title = r.shop;
+    $('mark').textContent = (r.shop || 'C').trim().charAt(0).toUpperCase();
+    orderType = r.orderTypes[0] || '';
+    renderTypes(); renderCats(); renderMenu(); renderCart();
+    $('menuLoading').hidden = true; $('orderUI').hidden = false;
+  }).catch(function(e){
+    var msg = String(e && e.message || e);
+    if (!IN_GAS && /key|connected/i.test(msg)) return showConnect(msg);
+    $('menuLoading').textContent = 'Couldn’t load the menu: ' + msg + '. Check the connection and reload.';
+  });
+}
+function renderCats(){
+  var cats = ['All'];
+  menu.forEach(function(m){ if (cats.indexOf(m.category) < 0) cats.push(m.category); });
+  var box = $('cats'); box.innerHTML = '';
+  cats.forEach(function(c){
+    var b = el('button','chip',c); b.type = 'button'; b.setAttribute('aria-pressed', String(c === activeCat));
+    b.onclick = function(){ activeCat = c; renderCats(); renderMenu(); };
+    box.appendChild(b);
+  });
+}
+function renderMenu(){
+  var q = $('search').value.trim().toLowerCase();
+  var list = menu.filter(function(m){ return (activeCat === 'All' || m.category === activeCat) && (!q || m.item.toLowerCase().indexOf(q) >= 0 || m.category.toLowerCase().indexOf(q) >= 0); });
+  var box = $('menu'); box.innerHTML = '';
+  if (!list.length){ box.appendChild(el('p','empty', q ? 'Nothing matches “' + q + '”.' : 'No items in this category.')); return; }
+  var groups = {};
+  list.forEach(function(m){ (groups[m.category] = groups[m.category] || []).push(m); });
+  Object.keys(groups).forEach(function(cat){
+    if (activeCat === 'All' || q) box.appendChild(el('div','cat',cat));
+    var grid = el('div','grid');
+    groups[cat].forEach(function(m){
+      var b = el('button','item'); b.type = 'button';
+      b.appendChild(el('b','',m.item));
+      var foot = el('span','');
+      if (m.price !== null) foot.appendChild(el('span','price',money(m.price)));
+      if (!m.hasRecipe) foot.appendChild(el('span','nr', (m.price !== null ? ' · ' : '') + 'no recipe yet'));
+      b.appendChild(foot);
+      var inCart = cart.filter(function(l){ return l.item === m.item; }).reduce(function(s,l){ return s + l.qty; }, 0);
+      if (inCart) b.appendChild(el('span','inc',String(inCart)));
+      b.onclick = function(){ add(m); };
+      grid.appendChild(b);
+    });
+    box.appendChild(grid);
+  });
+}
+$('search').oninput = renderMenu;
+
+/* ---------- cart ---------- */
+function add(m){
+  if (!cart.length) ref = uuid();
+  var line = cart.filter(function(l){ return l.item === m.item && !l.note; })[0];
+  if (line) line.qty = Math.min(999, line.qty + 1); else cart.push({ item:m.item, price:m.price, qty:1, note:'' });
+  renderCart(); renderMenu();
+}
+function total(){
+  if (!cart.length || cart.some(function(l){ return l.price === null; })) return null;
+  return cart.reduce(function(s,l){ return s + l.price * l.qty; }, 0);
+}
+function count(){ return cart.reduce(function(s,l){ return s + l.qty; }, 0); }
+function renderCart(){
+  var box = $('lines'), focusMe = null; box.innerHTML = '';
+  if (!cart.length) box.appendChild(el('p','empty','Tap items on the menu to add them.'));
+  cart.forEach(function(l, i){
+    var row = el('div','line');
+    row.appendChild(el('div','n',l.item));
+    var st = el('div','stepper');
+    var minus = el('button','', '−'); minus.type='button'; minus.setAttribute('aria-label','One less ' + l.item);
+    var plus = el('button','', '+'); plus.type='button'; plus.setAttribute('aria-label','One more ' + l.item);
+    minus.onclick = function(){ l.qty -= 1; if (l.qty < 1) cart.splice(i,1); renderCart(); renderMenu(); };
+    plus.onclick = function(){ l.qty = Math.min(999, l.qty + 1); renderCart(); renderMenu(); };
+    st.appendChild(minus); st.appendChild(el('span','',String(l.qty))); st.appendChild(plus);
+    row.appendChild(st);
+    if (l.price !== null) row.appendChild(el('div','p', money(l.price * l.qty)));
+    if (l.noteOpen || l.note){
+      var inp = el('input','note'); inp.type='text'; inp.maxLength=200; inp.placeholder='Note, e.g. oat milk, no onions'; inp.value=l.note;
+      inp.oninput = function(){ l.note = inp.value; };
+      row.appendChild(inp);
+      if (l.noteOpen && !l.note) focusMe = inp;
+      l.noteOpen = false;
+    } else {
+      var nb = el('button','notebtn','+ Add note'); nb.type='button'; nb.onclick = function(){ l.noteOpen = true; renderCart(); };
+      row.appendChild(nb);
+    }
+    box.appendChild(row);
+  });
+  if (focusMe) focusMe.focus();
+  var t = total(), n = count();
+  $('placeBtn').disabled = !n;
+  $('placeLabel').textContent = n ? 'Place order · ' + n + ' item' + (n === 1 ? '' : 's') : 'Place order';
+  $('placeTotal').textContent = t === null ? '' : money(t);
+  $('reviewBtn').disabled = !n;
+  $('reviewLabel').textContent = n ? 'Review order · ' + n + ' item' + (n === 1 ? '' : 's') : 'No items yet';
+  $('reviewTotal').textContent = t === null ? '' : money(t);
+  if (!n) closeSheet();
+}
+function renderTypes(){
+  var box = $('types'); box.innerHTML = '';
+  shop.orderTypes.forEach(function(t){
+    var b = el('button','',t); b.type='button'; b.setAttribute('aria-pressed', String(t === orderType));
+    b.onclick = function(){ orderType = t; renderTypes(); };
+    box.appendChild(b);
+  });
+}
+var clearArm = false;
+$('clearBtn').onclick = function(){
+  if (!cart.length) return;
+  if (!clearArm){ clearArm = true; $('clearBtn').textContent = 'Tap to clear'; setTimeout(function(){ clearArm = false; $('clearBtn').textContent = 'Clear'; }, 3000); return; }
+  clearArm = false; $('clearBtn').textContent = 'Clear';
+  resetOrder();
+};
+function resetOrder(){
+  cart = []; ref = ''; $('customer').value = ''; $('notes').value = ''; $('placeErr').hidden = true;
+  orderType = shop.orderTypes[0] || ''; renderTypes(); renderCart(); renderMenu();
+}
+function openSheet(){ $('cart').classList.add('open'); $('shade').hidden = false; }
+function closeSheet(){ $('cart').classList.remove('open'); $('shade').hidden = true; }
+$('reviewBtn').onclick = openSheet;
+$('shade').onclick = closeSheet;
+
+/* ---------- place order ---------- */
+$('placeBtn').onclick = function(){
+  if (!cart.length) return;
+  var b = $('placeBtn'); b.disabled = true; $('placeLabel').textContent = 'Placing…'; $('placeErr').hidden = true;
+  call('createOrder', {
+    ref: ref, customer: $('customer').value.trim(), type: orderType, notes: $('notes').value.trim(),
+    items: cart.map(function(l){ return { item:l.item, qty:l.qty, note:l.note.trim() }; })
+  }).then(function(r){
+    if (!r || !r.ok) throw new Error(r && r.error || 'Order not placed');
+    showDone(r);
+    resetOrder(); closeSheet();
+    refreshCount();
+  }).catch(function(e){
+    $('placeErr').textContent = (e.message || e) + '. Your order is still here; tap Place order to try again.';
+    $('placeErr').hidden = false; renderCart();
+  });
+};
+function showDone(r){
+  var o = r.order;
+  $('doneId').textContent = o.id + (o.customer ? ' · ' + o.customer : '') + ' · ' + o.type;
+  $('doneSummary').textContent = o.summary + (o.total !== null ? ' · ' + money(o.total) : '');
+  $('doneWarn').hidden = !r.warning; $('doneWarn').textContent = r.warning || '';
+  var tb = $('doneCons'); tb.innerHTML = '';
+  (o.constituents || []).forEach(function(c){
+    var tr = el('tr');
+    tr.appendChild(el('td','',c.material));
+    tr.appendChild(el('td','muted',c.itemQty + '× ' + c.item));
+    tr.appendChild(el('td','num',num(c.total) + ' ' + c.unit));
+    tb.appendChild(tr);
+  });
+  if (!(o.constituents || []).length){ var tr = el('tr'); var td = el('td','muted','No recipes found for these items.'); td.colSpan = 3; tr.appendChild(td); tb.appendChild(tr); }
+  if (r.duplicate) toast('This order was already saved');
+  $('orderUI').hidden = true; $('doneUI').hidden = false; $('mobileBar').hidden = true;
+  window.scrollTo(0,0);
+}
+$('newBtn').onclick = function(){ $('doneUI').hidden = true; $('orderUI').hidden = false; $('mobileBar').hidden = false; };
+$('toOrdersBtn').onclick = function(){ $('doneUI').hidden = true; $('orderUI').hidden = false; show('orders'); };
+
+/* ---------- orders board ---------- */
+var oFilter = 'active';
+$('oDate').value = ymd(new Date());
+$('oDate').onchange = loadOrders;
+$('oRefresh').onclick = loadOrders;
+$('oFilter').onclick = function(e){
+  var f = e.target.dataset && e.target.dataset.f; if (!f) return;
+  oFilter = f;
+  document.querySelectorAll('#oFilter button').forEach(function(b){ b.setAttribute('aria-pressed', String(b.dataset.f === f)); });
+  loadOrders();
+};
+var NEXT = { New:'Preparing', Preparing:'Ready', Ready:'Completed' };
+var NEXT_LABEL = { New:'Start preparing', Preparing:'Mark ready', Ready:'Complete' };
+var lastOrders = [];
+function loadOrders(quiet){
+  var box = $('oList');
+  if (!quiet){ box.innerHTML = ''; box.appendChild(loading()); }
+  var status = oFilter === 'active' ? 'New,Preparing,Ready' : oFilter === 'all' ? '' : oFilter;
+  return call('orders', { date: $('oDate').value || ymd(new Date()), status: status, detail: true }).then(function(r){
+    if (!r || !r.ok) throw new Error(r && r.error || 'Could not load orders');
+    lastOrders = r.orders; renderOrders();
+    if ($('oDate').value === ymd(new Date())) setCount(oFilter === 'active' ? r.orders.length : null);
+  }).catch(function(e){ if (!quiet){ box.innerHTML = ''; box.appendChild(el('p','empty','Couldn’t load orders: ' + (e.message || e))); } });
+}
+function renderOrders(){
+  var box = $('oList'); box.innerHTML = '';
+  if (!lastOrders.length){ box.appendChild(el('p','empty', oFilter === 'active' ? 'No open orders right now.' : 'No orders for this filter.')); return; }
+  var grid = el('div','cards');
+  lastOrders.slice().sort(function(a,b){ return oFilter === 'active' ? a.createdAt.localeCompare(b.createdAt) : b.createdAt.localeCompare(a.createdAt); })
+  .forEach(function(o){
+    var c = el('article','ocard');
+    var top = el('div','top'); var left = el('div','');
+    left.appendChild(el('div','who', o.customer || 'Walk-in'));
+    left.appendChild(el('div','meta', timeOf(o.createdAt) + ' · ' + o.type));
+    top.appendChild(left); top.appendChild(el('span','pill s-' + o.status, o.status));
+    c.appendChild(top);
+    var ul = el('ul');
+    (o.items || []).forEach(function(it){ var li = el('li','', it.qty + '× ' + it.item); if (it.note){ li.appendChild(document.createTextNode(' ')); li.appendChild(el('small','', '(' + it.note + ')')); } ul.appendChild(li); });
+    c.appendChild(ul);
+    if (o.notes) c.appendChild(el('div','meta','Note: ' + o.notes));
+    var meta = el('div','meta'); meta.appendChild(el('span','oid',o.id));
+    if (o.total !== null) meta.appendChild(document.createTextNode(' · ' + money(o.total)));
+    if (o.source && o.source !== 'Website') meta.appendChild(document.createTextNode(' · ' + o.source));
+    c.appendChild(meta);
+    if ((o.constituents || []).length){
+      var d = el('details'); d.appendChild(el('summary','','Ingredients used (' + o.constituents.length + ')'));
+      var t = el('table'); var tb = el('tbody');
+      o.constituents.forEach(function(x){ var tr = el('tr'); tr.appendChild(el('td','',x.material)); tr.appendChild(el('td','num',num(x.total) + ' ' + x.unit)); tb.appendChild(tr); });
+      t.appendChild(tb); d.appendChild(t); c.appendChild(d);
+    }
+    var act = el('div','actions');
+    if (NEXT[o.status]){
+      var nb = el('button','btn primary',NEXT_LABEL[o.status]); nb.type='button';
+      nb.onclick = function(){ setStatus(o, NEXT[o.status], nb); };
+      act.appendChild(nb);
+    }
+    if (o.status !== 'Completed' && o.status !== 'Cancelled'){
+      var cb = el('button','btn','Cancel'); cb.type='button'; var armed = false;
+      cb.onclick = function(){
+        if (!armed){ armed = true; cb.textContent = 'Tap again to cancel'; setTimeout(function(){ armed = false; cb.textContent = 'Cancel'; }, 3000); return; }
+        setStatus(o, 'Cancelled', cb);
+      };
+      act.appendChild(cb);
+    }
+    if (o.status === 'Cancelled'){
+      var rb = el('button','btn','Restore'); rb.type='button'; rb.onclick = function(){ setStatus(o, 'New', rb); }; act.appendChild(rb);
+    }
+    if (act.children.length) c.appendChild(act);
+    grid.appendChild(c);
+  });
+  box.appendChild(grid);
+}
+function setStatus(o, status, btn){
+  btn.disabled = true;
+  call('updateStatus', { id:o.id, status:status }).then(function(r){
+    if (!r || !r.ok) throw new Error(r && r.error || 'Not updated');
+    toast(o.id + ' → ' + status);
+    return loadOrders(true);
+  }).catch(function(e){ btn.disabled = false; toast('Not updated: ' + (e.message || e)); });
+}
+function setCount(n){ var c = $('activeCount'); if (n === null) return; c.textContent = String(n); c.hidden = !n; }
+function refreshCount(){
+  call('orders', { date: ymd(new Date()), status:'New,Preparing,Ready' }).then(function(r){ if (r && r.ok) setCount(r.count); }).catch(function(){});
+}
+setInterval(function(){
+  if (document.hidden) return;
+  if (view === 'orders') loadOrders(true); else refreshCount();
+}, 20000);
+
+/* ---------- ingredient usage ---------- */
+var lastUsage = null;
+function setRange(back){
+  var to = new Date(), from = new Date();
+  if (back === 1){ to.setDate(to.getDate()-1); from.setDate(from.getDate()-1); }
+  if (back === 7){ from.setDate(from.getDate()-6); }
+  $('uFrom').value = ymd(from); $('uTo').value = ymd(to);
+}
+setRange(0);
+$('uQuick').onclick = function(e){ var q = e.target.dataset && e.target.dataset.q; if (q === undefined) return; setRange(Number(q)); loadUsage(); };
+$('uFrom').onchange = loadUsage; $('uTo').onchange = loadUsage;
+function loadUsage(){
+  var box = $('uBody'); box.innerHTML = ''; box.appendChild(loading());
+  var from = $('uFrom').value, to = $('uTo').value;
+  if (from > to){ var t = from; from = to; to = t; $('uFrom').value = from; $('uTo').value = to; }
+  call('usage', { from: from, to: to }).then(function(r){
+    if (!r || !r.ok) throw new Error(r && r.error || 'Could not load usage');
+    lastUsage = r; renderUsage();
+  }).catch(function(e){ box.innerHTML = ''; box.appendChild(el('p','empty','Couldn’t load usage: ' + (e.message || e))); });
+}
+function renderUsage(){
+  var r = lastUsage, box = $('uBody'); box.innerHTML = '';
+  var stats = el('div','stats');
+  [[r.orders,'orders'],[r.items.reduce(function(s,i){ return s + i.qty; },0),'items sold'],[r.materials.length,'ingredients used']].forEach(function(s){
+    var d = el('div','stat'); d.appendChild(el('b','',String(s[0]))); d.appendChild(el('span','',s[1])); stats.appendChild(d);
+  });
+  box.appendChild(stats);
+  if (!r.orders){ box.appendChild(el('p','empty','No orders in these dates. Cancelled orders are not counted.')); return; }
+  var two = el('div','two');
+  var a = el('div'); a.appendChild(el('h3','','Items sold'));
+  var wa = el('div','tablewrap'); var ta = el('table'); ta.innerHTML = '<thead><tr><th>Item</th><th class="num">Qty</th></tr></thead>';
+  var tba = el('tbody'); r.items.forEach(function(i){ var tr = el('tr'); tr.appendChild(el('td','',i.item)); tr.appendChild(el('td','num',String(i.qty))); tba.appendChild(tr); });
+  ta.appendChild(tba); wa.appendChild(ta); a.appendChild(wa);
+  var b = el('div'); b.appendChild(el('h3','','Ingredients used'));
+  var wb = el('div','tablewrap'); var tb = el('table'); tb.innerHTML = '<thead><tr><th>Ingredient</th><th>ID</th><th class="num">Used</th><th>Unit</th></tr></thead>';
+  var tbb = el('tbody'), cat = null;
+  r.materials.forEach(function(m){
+    if (m.category !== cat){ cat = m.category; var g = el('tr','group'); var gd = el('td','',cat || 'Other'); gd.colSpan = 4; g.appendChild(gd); tbb.appendChild(g); }
+    var tr = el('tr'); tr.appendChild(el('td','',m.material)); tr.appendChild(el('td','muted',m.materialId)); tr.appendChild(el('td','num',num(m.total))); tr.appendChild(el('td','',m.unit)); tbb.appendChild(tr);
+  });
+  tb.appendChild(tbb); wb.appendChild(tb); b.appendChild(wb);
+  two.appendChild(a); two.appendChild(b); box.appendChild(two);
+}
+$('uCopy').onclick = function(){
+  if (!lastUsage) return;
+  var q = function(s){ s = String(s); return /[",\n]/.test(s) ? '"' + s.replace(/"/g,'""') + '"' : s; };
+  var csv = ['Material ID,Ingredient,Category,Used,Unit'].concat(lastUsage.materials.map(function(m){ return [m.materialId, m.material, m.category, num(m.total), m.unit].map(q).join(','); })).join('\n');
+  var done = function(){ toast('Copied ' + lastUsage.materials.length + ' rows'); };
+  if (navigator.clipboard) navigator.clipboard.writeText(csv).then(done).catch(function(){ fallbackCopy(csv); done(); });
+  else { fallbackCopy(csv); done(); }
+};
+function fallbackCopy(text){ var t = el('textarea'); t.value = text; document.body.appendChild(t); t.select(); try{ document.execCommand('copy'); }catch(e){} t.remove(); }
+
+/* ---------- connecting (only outside Apps Script) ---------- */
+function showConnect(msg){
+  $('menuLoading').hidden = true; $('orderUI').hidden = true; $('connectUI').hidden = false; $('mobileBar').hidden = true;
+  $('cUrl').value = CONFIG.API_URL || ''; $('cErr').hidden = !msg; $('cErr').textContent = msg || '';
+}
+$('connectUI').onsubmit = function(e){
+  e.preventDefault();
+  var url = $('cUrl').value.trim(), key = $('cKey').value.trim();
+  if (!/^https:\/\/script\.google(usercontent)?\.com\//.test(url)){ $('cErr').textContent = 'Use the Web app URL from Apps Script (it ends in /exec).'; $('cErr').hidden = false; return; }
+  CONFIG.API_URL = url; CONFIG.API_KEY = key; $('cBtn').disabled = true; $('cErr').hidden = true;
+  call('menu').then(function(r){
+    if (!r || !r.ok) throw new Error(r && r.error || 'Not connected');
+    try{ localStorage.setItem(STORE, JSON.stringify({ API_URL:url, API_KEY:key })); }catch(err){}
+    location.reload();
+  }).catch(function(err){ $('cErr').textContent = 'Couldn’t connect: ' + (err.message || err); $('cErr').hidden = false; $('cBtn').disabled = false; });
+};
+$('disconnectBtn').hidden = IN_GAS || !savedConn().API_URL;
+var discArm = false;
+$('disconnectBtn').onclick = function(){
+  if (!discArm){ discArm = true; $('disconnectBtn').textContent = 'Tap again to disconnect'; setTimeout(function(){ discArm = false; $('disconnectBtn').textContent = 'Disconnect this device'; }, 3000); return; }
+  try{ localStorage.removeItem(STORE); }catch(e){}
+  location.reload();
+};
+
+/* ---------- start ---------- */
+$('today').textContent = new Date().toLocaleDateString([], { weekday:'long', month:'long', day:'numeric' });
+if (!IN_GAS && !CONFIG.API_URL) showConnect();
+else { loadMenu(); refreshCount(); }
+})();
+</script>
+</body>
+</html>
